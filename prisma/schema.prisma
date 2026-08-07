@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Bidan {
+  id        String   @id @default(cuid())
+  nama      String
+  email     String   @unique
+  password  String   // hash dengan bcrypt
+  createdAt DateTime @default(now())
+  pasien    Pasien[]
+}
+
+model Pasien {
+  id           String        @id @default(cuid())
+  nama         String
+  nik          String?
+  tanggalLahir DateTime
+  alamat       String?
+  noHp         String?
+  namaSuami    String?
+  hpht         DateTime      // Hari Pertama Haid Terakhir, untuk hitung usia kehamilan & HPL
+  gpa          String?       // format G_P_A_ (Gravida/Para/Abortus)
+  faktorRisiko String?
+  qrToken      String        @unique @default(cuid())
+  bidanId      String
+  bidan        Bidan         @relation(fields: [bidanId], references: [id])
+  riwayat      Pemeriksaan[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Pemeriksaan {
+  id                String   @id @default(cuid())
+  pasienId          String
+  pasien            Pasien   @relation(fields: [pasienId], references: [id])
+  tanggal           DateTime @default(now())
+  tekananDarah      String?
+  beratBadan        Float?
+  tinggiFundus      Float?
+  detakJantungJanin Int?
+  catatan           String?
+  createdAt         DateTime @default(now())
+}
