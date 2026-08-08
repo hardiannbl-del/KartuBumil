@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/lib/auth";
 import Navbar from "@/components/Navbar";
 import { redirect } from "next/navigation";
 import { createPasien } from "@/app/actions/pasien";
@@ -7,7 +6,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
 export default async function PasienBaruPage() {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   
   if (!session?.user?.id) {
     redirect("/login");

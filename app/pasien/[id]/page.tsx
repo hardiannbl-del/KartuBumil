@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/lib/auth";
 import { getPasienById } from "@/app/actions/pasien";
 import { redirect } from "next/navigation";
 import Navbar from "@/components/Navbar";
@@ -7,14 +6,14 @@ import Link from "next/link";
 import { ArrowLeft, Calendar, FileText, Activity, Download, Printer } from "lucide-react";
 import { formatTanggal, hitungHPL, hitungUmur, hitungUsiaKehamilan } from "@/lib/kehamilan";
 import QRCode from "qrcode";
-import PemeriksaanForm from "./PemeriksaanForm";
+import PemeriksaanForm from "@/app/pasien/[id]/PemeriksaanForm";
 
 export default async function PasienDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   if (!session?.user?.id) redirect("/login");
 
   const { id } = await params;
@@ -168,7 +167,7 @@ export default async function PasienDetailPage({
                 </div>
               ) : (
                 <div className="divide-y divide-gray-100">
-                  {pasien.riwayat.map((rekam) => (
+                  {pasien.riwayat.map((rekam: any) => (
                     <div key={rekam.id} className="p-6 hover:bg-gray-50/50 transition-colors">
                       <div className="flex justify-between items-start mb-3">
                         <div className="flex items-center text-emerald-700 font-medium bg-emerald-50 px-3 py-1 rounded-full text-sm">

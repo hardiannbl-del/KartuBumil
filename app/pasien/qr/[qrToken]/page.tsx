@@ -93,7 +93,7 @@ export default async function PublicQrPage({
             </div>
           ) : (
             <div className="space-y-4">
-              {pasien.riwayat.map((rekam, index) => (
+              {pasien.riwayat.map((rekam: any, index: number) => (
                 <div key={rekam.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
                   <div className="flex items-center text-sm font-medium text-emerald-700 mb-4 bg-emerald-50 self-start px-3 py-1.5 rounded-lg inline-flex">
                     <Calendar size={14} className="mr-1.5" />

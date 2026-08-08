@@ -1,27 +1,19 @@
-import { withAuth } from "next-auth/middleware";
-import { NextResponse } from "next-auth/middleware";
+import { auth } from "@/lib/auth";
 
-export default withAuth(
-  function middleware(req) {
-    return NextResponse.next();
-  },
-  {
-    callbacks: {
-      authorized: ({ req, token }) => {
-        // Protect /dashboard and /pasien/* (except /pasien/qr/*)
-        const path = req.nextUrl.pathname;
-        if (
-          path.startsWith("/dashboard") ||
-          (path.startsWith("/pasien") && !path.startsWith("/pasien/qr"))
-        ) {
-          return token !== null;
-        }
-        return true;
-      },
-    },
+export default auth((req: any) => {
+  const path = req.nextUrl.pathname;
+  
+  if (
+    path.startsWith("/dashboard") ||
+    (path.startsWith("/pasien") && !path.startsWith("/pasien/qr"))
+  ) {
+    if (!req.auth) {
+      const url = new URL("/login", req.url);
+      return Response.redirect(url);
+    }
   }
-);
+});
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/pasien/:path*"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
 };

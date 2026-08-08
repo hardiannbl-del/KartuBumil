@@ -1,5 +1,4 @@
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { auth } from "@/lib/auth";
 import { getPasiens } from "@/app/actions/pasien";
 import Navbar from "@/components/Navbar";
 import Link from "next/link";
@@ -12,7 +11,7 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
-  const session = await getServerSession(authOptions);
+  const session = await auth();
   
   if (!session?.user?.id) {
     redirect("/login");
@@ -74,7 +73,7 @@ export default async function DashboardPage({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {pasiens.map((p) => (
+                  {pasiens.map((p: any) => (
                     <tr key={p.id} className="hover:bg-gray-50/50 transition-colors">
                       <td className="p-4">
                         <div className="flex items-center">
