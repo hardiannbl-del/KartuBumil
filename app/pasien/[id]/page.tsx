@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { getPasienById } from "@/app/actions/pasien";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import Navbar from "@/components/Navbar";
 import Link from "next/link";
 import { ArrowLeft, Calendar, FileText, Activity, Download, Printer } from "lucide-react";
@@ -37,10 +38,12 @@ export default async function PasienDetailPage({
   const umur = hitungUmur(pasien.tanggalLahir);
   const usiaKehamilan = hitungUsiaKehamilan(pasien.hpht);
   
-  // Generate QR Code URL
-  // We need the absolute URL. In production, process.env.NEXT_PUBLIC_APP_URL should be used.
-  // For prototype, we can use a relative or hardcoded local path, but QR needs absolute.
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  // Generate QR Code URL dynamically based on the current request host
+  const headersList = await headers();
+  const host = headersList.get("host") || "localhost:3000";
+  const protocol = headersList.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${protocol}://${host}`;
+  
   const qrUrl = `${baseUrl}/pasien/qr/${pasien.qrToken}`;
   const qrDataUrl = await QRCode.toDataURL(qrUrl, {
     width: 200,
