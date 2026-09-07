@@ -7,6 +7,7 @@ import { ArrowLeft, Calendar, FileText, Activity, Download, Printer } from "luci
 import { formatTanggal, hitungHPL, hitungUmur, hitungUsiaKehamilan } from "@/lib/kehamilan";
 import QRCode from "qrcode";
 import PemeriksaanForm from "@/app/pasien/[id]/PemeriksaanForm";
+import DeletePasienButton from "@/components/DeletePasienButton";
 
 export default async function PasienDetailPage({
   params,
@@ -55,11 +56,12 @@ export default async function PasienDetailPage({
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Navbar />
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full">
-        <div className="mb-6">
+        <div className="mb-6 flex justify-between items-center">
           <Link href="/dashboard" className="inline-flex items-center text-sm text-gray-500 hover:text-emerald-600 transition-colors">
             <ArrowLeft size={16} className="mr-1" />
             Kembali ke Dashboard
           </Link>
+          <DeletePasienButton pasienId={pasien.id} namaPasien={pasien.nama} redirectToDashboard />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -107,7 +109,7 @@ export default async function PasienDetailPage({
                     <p className="text-sm text-gray-500 font-medium">Riwayat Kehamilan</p>
                     <p className="font-medium text-gray-900">{pasien.gpa || "-"}</p>
                   </div>
-                  {pasien.faktorRisiko && (
+                  {pasien.faktorRisiko && pasien.faktorRisiko !== "-" && (
                     <div className="bg-red-50 p-3 rounded-lg border border-red-100 mt-4">
                       <p className="text-sm text-red-800 font-medium flex items-center">
                         <Activity size={16} className="mr-1" />
@@ -197,10 +199,23 @@ export default async function PasienDetailPage({
                       
                       {rekam.catatan && (
                         <div>
-                          <p className="text-sm font-medium text-gray-700 mb-1">Catatan Tambahan:</p>
-                          <p className="text-sm text-gray-600 bg-yellow-50 p-3 rounded-lg border border-yellow-100">
-                            {rekam.catatan}
-                          </p>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Catatan & Data Tambahan:</p>
+                          {rekam.catatan.includes(" • ") ? (
+                            <div className="flex flex-wrap gap-2 p-3 bg-emerald-50/40 rounded-xl border border-emerald-100">
+                              {rekam.catatan.split(" • ").map((item: string, idx: number) => (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-white text-emerald-900 border border-emerald-200 shadow-2xs"
+                                >
+                                  {item}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-700 bg-emerald-50/40 p-3 rounded-xl border border-emerald-100">
+                              {rekam.catatan}
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>

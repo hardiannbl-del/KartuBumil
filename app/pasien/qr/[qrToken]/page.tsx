@@ -69,7 +69,7 @@ export default async function PublicQrPage({
             </div>
           </div>
           
-          {pasien.faktorRisiko && (
+          {pasien.faktorRisiko && pasien.faktorRisiko !== "-" && (
             <div className="mt-4 bg-red-50 rounded-xl p-4 border border-red-100/50 relative">
               <p className="text-xs text-red-800 font-medium flex items-center mb-1">
                 <Activity size={14} className="mr-1" />
@@ -122,8 +122,21 @@ export default async function PublicQrPage({
                   
                   {rekam.catatan && (
                     <div className="mt-4 pt-4 border-t border-gray-100">
-                      <p className="text-xs text-gray-500 mb-1">Catatan Bidan</p>
-                      <p className="text-sm text-gray-700 italic">{rekam.catatan}</p>
+                      <p className="text-xs text-gray-500 mb-1.5 font-medium">Catatan & Data Tambahan</p>
+                      {rekam.catatan.includes(" • ") ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {rekam.catatan.split(" • ").map((item: string, idx: number) => (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-100"
+                            >
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-700 italic">{rekam.catatan}</p>
+                      )}
                     </div>
                   )}
                 </div>
