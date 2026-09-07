@@ -191,6 +191,57 @@ export async function importPasiensExcel(formData: FormData) {
       return { error: "File Excel kosong atau format tidak sesuai" };
     }
 
+    // =====================================================================
+    // HANDLE MULTI-ROW HEADER (Header Berlapis)
+    // Banyak Excel Puskesmas menggunakan merged-cell header dua baris:
+    //   Baris 1: Header utama ("Pemeriksaan ANC", "Identitas", dll) → jadi KEY xlsx
+    //   Baris 2: Sub-header ("Berat", "Tekanan Darah", "DJJ") → jadi __EMPTY_X
+    // Akibatnya baris data ke-2 dikenali sebagai baris data dengan key "__EMPTY_X".
+    // Solusi: deteksi baris sub-header, bangun remapping, lalu terapkan ke semua data.
+    // =====================================================================
+    let dataRows = rawData;
+
+    if (rawData.length > 1) {
+      const firstRow = rawData[0];
+      const firstRowVals = Object.values(firstRow).map((v) =>
+        String(v ?? "").trim().toLowerCase()
+      );
+
+      // Jika baris pertama mengandung kata khas nama kolom ANC/pemeriksaan, ini sub-header
+      const SUB_HEADER_MARKERS = [
+        "berat", "djj", "tfu", "tekanan darah", "lila",
+        "tanggal anc", "usia kehamilan", "presentasi janin", "imunisasi",
+      ];
+      const isSubHeader = firstRowVals.some((v) =>
+        SUB_HEADER_MARKERS.includes(v) || v === "berat" || v === "djj"
+      );
+
+      if (isSubHeader) {
+        // Bangun mapping: kunci xlsx (__EMPTY_X, "Pemeriksaan ANC", dll) → nama kolom asli
+        const keyMapping: Record<string, string> = {};
+        for (const [k, v] of Object.entries(firstRow)) {
+          const realName = String(v ?? "").trim();
+          if (realName) keyMapping[k] = realName;
+        }
+        console.log("[Excel Import] Sub-header terdeteksi. Remapping:", keyMapping);
+
+        // Remap semua baris data (mulai dari index 1, lewati sub-header)
+        dataRows = rawData.slice(1).map((row) => {
+          const newRow: any = {};
+          for (const [k, v] of Object.entries(row)) {
+            const realKey = keyMapping[k] ?? k; // gunakan nama asli jika ada
+            newRow[realKey] = v;
+          }
+          return newRow;
+        });
+
+        // Debug: tampilkan baris data pertama setelah remapping
+        if (dataRows.length > 0) {
+          console.log("[Excel Import] Contoh baris setelah remapping:", JSON.stringify(dataRows[0]));
+        }
+      }
+    }
+
     // Pastikan Bidan ada di database
     const bidan = await prisma.bidan.findUnique({
       where: { id: bidanId }
@@ -205,13 +256,20 @@ export async function importPasiensExcel(formData: FormData) {
       dataPemeriksaan: any | null;
     }> = [];
 
-    for (const row of rawData) {
-      // Helper pencocokan kunci kolom umum
+    for (const row of dataRows) {
+      // Normalisasi nama kolom: hapus newline (Alt+Enter Excel), tab, dan spasi ganda
+      // INI KRITIS! Banyak header Excel memakai Alt+Enter di dalam sel
+      const normalizeKey = (k: string) =>
+        k.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+
+      // Helper pencocokan kunci kolom dengan normalisasi
       const findVal = (...searchTerms: string[]) => {
         for (const term of searchTerms) {
-          const key = Object.keys(row).find((k) =>
-            k.trim().toLowerCase().includes(term.toLowerCase())
-          );
+          const normTerm = term.trim().toLowerCase();
+          const key = Object.keys(row).find((k) => {
+            const normK = normalizeKey(k);
+            return normK === normTerm || normK.includes(normTerm);
+          });
           if (key && row[key] !== undefined && row[key] !== null) {
             const val = String(row[key]).trim();
             if (val !== "") return val;
@@ -220,9 +278,26 @@ export async function importPasiensExcel(formData: FormData) {
         return undefined;
       };
 
-      const parseNumber = (val: string | undefined): number | undefined => {
-        if (!val) return undefined;
-        const cleaned = val.replace(",", ".").replace(/[^0-9.]/g, "");
+      // Juga cari nilai numerik langsung (untuk kolom BB, DJJ, TFU yang berupa angka)
+      const findRawVal = (...searchTerms: string[]) => {
+        for (const term of searchTerms) {
+          const normTerm = term.trim().toLowerCase();
+          const key = Object.keys(row).find((k) => {
+            const normK = normalizeKey(k);
+            return normK === normTerm || normK.includes(normTerm);
+          });
+          if (key && row[key] !== undefined && row[key] !== null) {
+            return row[key];
+          }
+        }
+        return undefined;
+      };
+
+      // parseNumber: tangani nilai angka dari Excel (typeof number) ATAU string
+      const parseNumber = (val: string | number | undefined | null): number | undefined => {
+        if (val === undefined || val === null) return undefined;
+        if (typeof val === "number") return isNaN(val) ? undefined : val;
+        const cleaned = String(val).replace(",", ".").replace(/[^0-9.]/g, "");
         const num = parseFloat(cleaned);
         return isNaN(num) ? undefined : num;
       };
@@ -230,7 +305,7 @@ export async function importPasiensExcel(formData: FormData) {
       // 1. Ekstraksi NAMA PASIEN (Ibu Hamil)
       // Jangan sampai salah cocok dengan "Nama Suami" atau "Nama Petugas"
       const namaKey = Object.keys(row).find((k) => {
-        const lower = k.trim().toLowerCase();
+        const lower = normalizeKey(k);
         if (
           lower.includes("suami") ||
           lower.includes("bidan") ||
@@ -300,7 +375,7 @@ export async function importPasiensExcel(formData: FormData) {
 
       // 2. Ekstraksi NIK (Hindari kolom "Klinik")
       const nikKey = Object.keys(row).find((k) => {
-        const lower = k.trim().toLowerCase();
+        const lower = normalizeKey(k);
         if (lower.includes("klinik") || lower.includes("teknik")) return false;
         return (
           lower === "nik" ||
@@ -332,12 +407,20 @@ export async function importPasiensExcel(formData: FormData) {
       // 4. Ekstraksi Alamat
       const alamat = findVal("alamat", "domisili", "tempat tinggal") || "-";
 
-      // 5. Ekstraksi NOMOR HP (PENTING: Jangan cocokkan HPHT / HPL!)
+      // 5. Ekstraksi NOMOR HP (PENTING: Jangan cocokkan HPHT / HPL / kolom lain yang kebetulan mengandung 'wa'!)
       let noHp = "-";
       const hpKey = Object.keys(row).find((k) => {
-        const lower = k.trim().toLowerCase();
-        // Kritis: hindari kolom HPHT, HPL, Haid
-        if (lower.includes("hpht") || lower.includes("hpl") || lower.includes("haid")) {
+        const lower = normalizeKey(k);
+        // Kritis: hindari kolom HPHT, HPL, Haid, dan kolom lain yang bukan telepon
+        if (
+          lower.includes("hpht") ||
+          lower.includes("hpl") ||
+          lower.includes("haid") ||
+          lower.includes("riwayat") ||
+          lower.includes("imun") ||
+          lower.includes("tenaga") ||
+          lower.includes("pemeriksa")
+        ) {
           return false;
         }
         return (
@@ -351,10 +434,10 @@ export async function importPasiensExcel(formData: FormData) {
           lower.includes("telp") ||
           lower.includes("handphone") ||
           lower.includes("whatsapp") ||
-          lower.includes("wa") ||
           lower.includes("kontak") ||
           lower === "hp" ||
-          /\bhp\b/.test(lower)
+          /\bhp\b/.test(lower) ||
+          /\bwa\b/.test(lower)   // word-boundary: cocokkan "wa" saja, bukan "riwayat"
         );
       });
 
@@ -375,7 +458,7 @@ export async function importPasiensExcel(formData: FormData) {
       }
 
       // 6. Ekstraksi Nama Suami
-      const namaSuamiKey = Object.keys(row).find((k) => k.trim().toLowerCase().includes("suami"));
+      const namaSuamiKey = Object.keys(row).find((k) => normalizeKey(k).includes("suami"));
       const namaSuami = (namaSuamiKey && row[namaSuamiKey] ? String(row[namaSuamiKey]).trim() : undefined) || "-";
 
       // 7. Ekstraksi HPHT (Hari Pertama Haid Terakhir)
@@ -402,35 +485,87 @@ export async function importPasiensExcel(formData: FormData) {
       const gpa = findVal("gpa", "riwayat kehamilan", "gravida") || "-";
 
       // 9. Data Pemeriksaan Fisik & Vital
-      const tekananDarah = findVal("tekanan darah", "tensi", "td", "mmhg");
-      const beratBadan = parseNumber(findVal("berat badan", "bb"));
-      const tinggiFundus = parseNumber(findVal("tinggi fundus", "tfu", "fundus"));
-      const detakJantungJanin = parseNumber(findVal("denyut jantung", "detak jantung", "djj", "djl"))
-        ? Math.round(parseNumber(findVal("denyut jantung", "detak jantung", "djj", "djl"))!)
-        : undefined;
+      // Catatan: gunakan findRawVal agar nilai numerik langsung dari Excel (typeof number) bisa diparse
+      const tekananDarah = findVal("tekanan darah", "tensi", "t/d", "td", "tekanan", "mmhg");
+      const beratBadan = parseNumber(findRawVal("berat badan", "berat", "bb") ?? findVal("berat"));
+      const rawTfu = findRawVal("tinggi fundus", "tfu", "fundus");
+      const tinggiFundus = parseNumber(rawTfu);
+
+      // DJJ: nilai di Excel bisa berupa angka ATAU teks seperti "Terdengar, normal (110-160)"
+      // Strategi: cari angka valid dalam rentang DJJ normal (60-220 bpm)
+      const rawDjj = findRawVal("denyut jantung janin", "detak jantung janin", "djj", "djl", "denyut jantung", "detak jantung");
+      let detakJantungJanin: number | undefined = undefined;
+      let djjTeks: string | undefined = undefined;
+      if (rawDjj !== undefined && rawDjj !== null) {
+        const djjStr = String(rawDjj).trim();
+        if (djjStr && djjStr !== "-") {
+          // Coba angka murni
+          const asNum = typeof rawDjj === "number" ? rawDjj : parseFloat(djjStr);
+          if (!isNaN(asNum) && asNum >= 60 && asNum <= 220) {
+            detakJantungJanin = Math.round(asNum);
+          } else {
+            // Coba ekstrak range seperti "110-160" → ambil tengahnya: 135
+            const rangeMatch = djjStr.match(/(\d{2,3})\s*[-–]\s*(\d{2,3})/);
+            if (rangeMatch) {
+              const lo = parseInt(rangeMatch[1]);
+              const hi = parseInt(rangeMatch[2]);
+              if (lo >= 60 && hi <= 220 && lo < hi) {
+                detakJantungJanin = Math.round((lo + hi) / 2);
+                djjTeks = djjStr; // simpan deskripsi asli di catatan
+              }
+            } else {
+              // Coba cari satu angka valid dalam teks
+              const singleMatch = djjStr.match(/\b(\d{2,3})\b/);
+              if (singleMatch) {
+                const num = parseInt(singleMatch[1]);
+                if (num >= 60 && num <= 220) {
+                  detakJantungJanin = num;
+                  djjTeks = djjStr;
+                }
+              } else if (/terdengar|normal|reguler|irregular/i.test(djjStr)) {
+                // Hanya deskripsi tanpa angka → catat sebagai teks saja
+                djjTeks = djjStr;
+              }
+            }
+          }
+        }
+      }
 
       // 10. OPSI B: Ekstraksi Data Tambahan (ANC, Eklampsia, Lab, Fisik Tambahan)
-      const anc = findVal("anc", "kunjungan", "trimester");
-      const eklampsia = findVal("eklampsia", "preeklampsia", "preeklamsia", "skrining pe", "pe");
+      // Faskes ANC: cocokkan "faskes yang melayani anc" secara spesifik
+      const faskesAnc = findVal("faskes yang melayani", "faskes anc", "klinik anc");
+      // ANC visit type: gunakan kolom Pemeriksaan Pertama atau Kunjungan
+      const ancKunjungan = findVal("pemeriksaan pertama", "kunjungan ke", "kunjungan", "trimester");
+      const anc = faskesAnc || ancKunjungan;
+      // Eklampsia: gunakan nama kolom spesifik "Pre Eklampsia" atau variannya
+      const eklampsia = findVal("pre eklampsia", "preeklampsia", "preeklamsia", "skrining pe");
       const lila = findVal("lila", "lingkar lengan");
-      const tinggiBadan = findVal("tinggi badan", "tb");
+      // Tinggi badan: hindari mencocokkan "Tinggi" yang ada di kolom "Tinggi" (BB kolom)
+      const tinggiBadanRaw = findVal("tinggi badan", "tb");
       const hb = findVal("hb", "hemoglobin");
-      const proteinUrine = findVal("protein urine", "protein urin", "protein");
+      const proteinUrine = findVal("protein urine", "protein urin");
       const glukosa = findVal("glukosa", "gula darah", "gds");
-      const letakJanin = findVal("letak janin", "presentasi", "letak");
-      const imunisasi = findVal("imunisasi", "status tt", "tt");
+      const letakJanin = findVal("presentasi janin", "letak janin", "presentasi", "letak");
+      // Imunisasi TT: gunakan nama kolom spesifik, hindari "tt" saja (terlalu lebar)
+      const imunisasi = findVal("riwayat imun tt", "status tt", "imunisasi tt", "imunisasi");
+      const konseling = findVal("konseling");
+      const gizi = findVal("status gizi", "kek");
       const catatanUmum = findVal("keluhan", "keterangan", "catatan", "terapi", "tindakan");
 
       const catatanItems: string[] = [];
-      if (anc) catatanItems.push(`ANC: ${anc}`);
+      if (faskesAnc) catatanItems.push(`Faskes ANC: ${faskesAnc}`);
+      else if (ancKunjungan) catatanItems.push(`ANC: ${ancKunjungan}`);
       if (eklampsia) catatanItems.push(`Skrining Preeklamsia: ${eklampsia}`);
       if (lila) catatanItems.push(`LiLA: ${lila}${lila.toLowerCase().includes("cm") ? "" : " cm"}`);
-      if (tinggiBadan) catatanItems.push(`TB: ${tinggiBadan}${tinggiBadan.toLowerCase().includes("cm") ? "" : " cm"}`);
+      if (tinggiBadanRaw) catatanItems.push(`TB: ${tinggiBadanRaw}${tinggiBadanRaw.toLowerCase().includes("cm") ? "" : " cm"}`);
       if (hb) catatanItems.push(`Hb: ${hb}${hb.toLowerCase().includes("g") ? "" : " g/dL"}`);
       if (proteinUrine) catatanItems.push(`Protein Urine: ${proteinUrine}`);
       if (glukosa) catatanItems.push(`Glukosa: ${glukosa}`);
       if (letakJanin) catatanItems.push(`Letak Janin: ${letakJanin}`);
       if (imunisasi) catatanItems.push(`Imunisasi TT: ${imunisasi}`);
+      if (gizi) catatanItems.push(`Gizi: ${gizi}`);
+      if (djjTeks) catatanItems.push(`DJJ: ${djjTeks}`);
+      if (konseling) catatanItems.push(`Konseling: ${konseling}`);
       if (catatanUmum) catatanItems.push(`Ket: ${catatanUmum}`);
 
       const ringkasanCatatan = catatanItems.length > 0 ? catatanItems.join(" • ") : undefined;
@@ -452,7 +587,7 @@ export async function importPasiensExcel(formData: FormData) {
       );
 
       let tanggalPemeriksaan = new Date();
-      const rawTglPeriksa = findVal("tanggal periksa", "tgl periksa", "tgl kunjungan", "tanggal kunjung");
+      const rawTglPeriksa = findVal("tanggal anc", "tanggal periksa", "tgl periksa", "tgl kunjungan", "tanggal kunjung");
       if (rawTglPeriksa) {
         const parsed = new Date(rawTglPeriksa);
         if (!isNaN(parsed.getTime())) {
